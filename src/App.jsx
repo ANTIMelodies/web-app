@@ -12,6 +12,35 @@ import zhCN from 'antd/locale/zh_CN';
 import { CopyOutlined, UploadOutlined, DownloadOutlined, ImportOutlined, LikeOutlined } from '@ant-design/icons';
 import { fetchAll, saveItem, deleteItem, TABLES } from './leancloud';
 
+// AnimatedModal 组件定义
+function AnimatedModal({ open, onCancel, children }) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <Modal
+          open={open}
+          onCancel={onCancel}
+          footer={null}
+          centered
+          width={400}
+          maskStyle={{ backdropFilter: 'blur(4px)' }}
+          destroyOnClose
+          style={{ borderRadius: 24, overflow: 'hidden' }}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 40 }}
+            transition={{ duration: 0.3 }}
+          >
+            {children}
+          </motion.div>
+        </Modal>
+      )}
+    </AnimatePresence>
+  );
+}
+
 function Navbar() {
   return (
     <nav className="w-full flex justify-center py-6 bg-white/80 backdrop-blur shadow-sm mb-8 sticky top-0 z-10">
