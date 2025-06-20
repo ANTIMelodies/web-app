@@ -337,9 +337,9 @@ function Contact() {
       <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-xl mt-8">
         <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, scale:0.8}} animate={{opacity:1, scale:1}} transition={{duration:0.7}}>联系我们</motion.h2>
         <motion.ul className="text-gray-700 space-y-2" initial={{opacity:0}} animate={{opacity:1}} transition={{delay:0.3, duration:0.7}}>
-          <li>邮箱：cxnet@university.edu</li>
-          <li>QQ群：123456789</li>
-          <li>微信：cxnet_official</li>
+          <li>邮箱：2542750721@qq.com</li>
+          <li>QQ群：630976820</li>
+          <li>微信号：antimelody</li>
         </motion.ul>
       </section>
     </AnimatedPage>
