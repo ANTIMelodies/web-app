@@ -10,6 +10,7 @@ import { useState, useEffect } from 'react';
 import { ConfigProvider, Button, Input, Modal, Form, List, message, Tabs } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { CopyOutlined, UploadOutlined, DownloadOutlined, ImportOutlined, LikeOutlined } from '@ant-design/icons';
+import { fetchAll, saveItem, deleteItem, TABLES } from './leancloud';
 
 function Navbar() {
   return (
@@ -106,107 +107,299 @@ function Home() {
   );
 }
 
-// 工具函数：本地存储
-const STORAGE_KEY = 'cxnet_data_v1';
-const defaultData = {
-  resources: [
-    { title: '开源项目推荐', desc: '精选开源项目，适合学习和参与', img: '', link: '' },
-    { title: '技术讲座PPT', desc: '历届讲座PPT下载', img: '', link: '' },
-    { title: '社团内部文档', desc: '协会内部资料文档', img: '', link: '' }
-  ],
-  coding: [
-    { name: 'LeetCode 刷题', link: 'https://leetcode.cn/' },
-    { name: '菜鸟教程', link: 'https://www.runoob.com/' },
-    { name: '力扣题解精选', link: 'https://leetcode-solution.cn/' }
-  ],
-  events: [
-    { title: '2024春季编程马拉松', desc: '春季编程马拉松精彩回顾', img: '', link: '' },
-    { title: '2023秋季技术沙龙', desc: '技术沙龙活动集锦', img: '', link: '' },
-    { title: '2023暑期创新训练营', desc: '暑期创新训练营精彩瞬间', img: '', link: '' },
-    { title: '更多精彩活动，敬请期待！', desc: '', img: '', link: '' }
-  ],
-  messages: []
-};
-function loadData() {
-  try {
-    const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (d && d.resources && d.events && d.coding && d.messages) return d;
-  } catch {}
-  return defaultData;
-}
-function saveData(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
-function exportData() {
-  const data = localStorage.getItem(STORAGE_KEY);
-  const blob = new Blob([data], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'cxnet_data_backup.json';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-function importData(cb) {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json,application/json';
-  input.onchange = e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      try {
-        const d = JSON.parse(evt.target.result);
-        if (d && d.resources && d.events && d.coding && d.messages) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
-          cb && cb();
-        } else {
-          message.error('数据格式不正确');
-        }
-      } catch {
-        message.error('导入失败，文件格式错误');
-      }
-    };
-    reader.readAsText(file);
+function useCloudList(table) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let mounted = true;
+    async function load() {
+      setLoading(true);
+      const data = await fetchAll(table);
+      if (mounted) setList(data);
+      setLoading(false);
+    }
+    load();
+    return () => { mounted = false; };
+  }, [table]);
+  // 新增/编辑
+  const upsert = async (data, objectId) => {
+    await saveItem(table, data, objectId);
+    const newList = await fetchAll(table);
+    setList(newList);
   };
-  input.click();
+  // 删除
+  const remove = async (objectId) => {
+    await deleteItem(table, objectId);
+    const newList = await fetchAll(table);
+    setList(newList);
+  };
+  return { list, loading, upsert, remove, reload: async () => setList(await fetchAll(table)) };
 }
 
-// Admin 管理后台
+function Resources() {
+  const codingCloud = useCloudList(TABLES.coding);
+  const resourcesCloud = useCloudList(TABLES.resources);
+  const [modal, setModal] = useState({ open: false, item: null });
+  const [codingModal, setCodingModal] = useState(false);
+  // 复制链接
+  const handleCopy = (text) => {
+    navigator.clipboard.writeText(text);
+  };
+  return (
+    <AnimatedPage>
+      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-2xl mt-8">
+        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, x:-40}} animate={{opacity:1, x:0}} transition={{duration:0.7}}>资源分享</motion.h2>
+        {/* 编程学习资料卡片 */}
+        <motion.div
+          className="bg-gradient-to-br from-blue-100 to-white rounded-3xl p-5 shadow-lg transition cursor-pointer mb-8 hover:shadow-2xl hover:scale-105 border border-blue-200"
+          whileHover={{ scale: 1.04, boxShadow: '0 12px 40px 0 rgba(31,38,135,0.14)' }}
+          whileTap={{ scale: 0.98 }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          onClick={() => setCodingModal(true)}
+        >
+          <div className="font-bold text-lg mb-2 text-blue-900">编程学习资料</div>
+          <div className="text-gray-500 text-sm">点击查看全部条目</div>
+        </motion.div>
+        {/* 其它资源 */}
+        <div className="grid gap-4">
+          {resourcesCloud.list.map((item, idx) => (
+            <motion.div
+              key={item.objectId || item.title + idx}
+              className="bg-gray-50 rounded-2xl p-4 shadow transition cursor-pointer"
+              whileHover={{ scale: 1.04, boxShadow: '0 8px 32px 0 rgba(31,38,135,0.12)' }}
+              whileTap={{ scale: 0.98 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 + idx * 0.1, duration: 0.5 }}
+              onClick={() => setModal({ open: true, item })}
+            >
+              <div className="flex gap-4 items-center">
+                {item.img && <img src={item.img} alt="" className="h-16 w-16 object-cover rounded-lg border" />}
+                <div className="flex-1">
+                  <div className="text-lg font-bold text-gray-800">{item.title}</div>
+                  {item.desc && <div className="text-gray-500 text-sm mb-1">{item.desc}</div>}
+                  {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击查看</a>}
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+        {/* 其它资源弹窗 */}
+        <AnimatedModal open={modal.open} onCancel={() => setModal({ open: false, item: null })}>
+          {modal.item && (
+            <div className="flex flex-col items-center">
+              {modal.item.img && <img src={modal.item.img} alt="" className="h-32 w-32 object-cover rounded-2xl mb-4" />}
+              <div className="text-2xl font-bold mb-2 text-center">{modal.item.title}</div>
+              {modal.item.desc && <div className="text-gray-600 mb-2 text-center whitespace-pre-line">{modal.item.desc}</div>}
+              {modal.item.link && <a href={modal.item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击访问链接</a>}
+            </div>
+          )}
+        </AnimatedModal>
+        {/* 编程学习资料弹窗 */}
+        <AnimatedModal open={codingModal} onCancel={() => setCodingModal(false)}>
+          <div className="flex flex-col items-center">
+            <div className="text-2xl font-bold mb-4 text-center text-blue-900">编程学习资料</div>
+            <ul className="w-full space-y-3">
+              {codingCloud.list.map((item, idx) => (
+                <li
+                  key={item.objectId || idx}
+                  className="flex flex-col md:flex-row md:items-center bg-blue-50 rounded-xl px-4 py-3 select-all break-all border border-blue-100 shadow-sm"
+                >
+                  <span className="font-bold text-gray-800 flex-shrink-0 md:w-32 mb-1 md:mb-0 truncate">{item.name}</span>
+                  <Button
+                    type="link"
+                    icon={<CopyOutlined />}
+                    size="small"
+                    className="text-blue-600 font-mono break-all text-left"
+                    style={{ padding: 0, wordBreak: 'break-all', whiteSpace: 'normal' }}
+                    onClick={() => handleCopy(item.link)}
+                  >{item.link}</Button>
+                </li>
+              ))}
+            </ul>
+            <div className="text-xs text-gray-400 mt-2">* 点击链接可复制</div>
+          </div>
+        </AnimatedModal>
+      </section>
+    </AnimatedPage>
+  );
+}
+
+function Events() {
+  const eventsCloud = useCloudList(TABLES.events);
+  const [modal, setModal] = useState({ open: false, item: null });
+  useEffect(() => {}, []);
+  return (
+    <AnimatedPage>
+      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-xl mt-8">
+        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, x:40}} animate={{opacity:1, x:0}} transition={{duration:0.7}}>活动展示</motion.h2>
+        <div className="grid gap-4">
+          {eventsCloud.list.map((item, idx) => (
+            <motion.div
+              key={item.objectId || item.title + idx}
+              className="bg-gray-50 rounded-2xl p-4 shadow transition cursor-pointer"
+              whileHover={{ scale: 1.04, boxShadow: '0 8px 32px 0 rgba(31,38,135,0.12)' }}
+              whileTap={{ scale: 0.98 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 + idx * 0.1, duration: 0.5 }}
+              onClick={() => setModal({ open: true, item })}
+            >
+              <div className="flex gap-4 items-center">
+                {item.img && <img src={item.img} alt="" className="h-16 w-16 object-cover rounded-lg border" />}
+                <div className="flex-1">
+                  <div className="text-lg font-bold text-gray-800">{item.title}</div>
+                  {item.desc && <div className="text-gray-500 text-sm mb-1">{item.desc}</div>}
+                  {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击查看</a>}
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+        {/* 弹窗展示详细内容，带毛玻璃遮罩 */}
+        <AnimatedModal open={modal.open} onCancel={() => setModal({ open: false, item: null })}>
+          {modal.item && (
+            <div className="flex flex-col items-center">
+              {modal.item.img && <img src={modal.item.img} alt="" className="h-32 w-32 object-cover rounded-2xl mb-4" />}
+              <div className="text-2xl font-bold mb-2 text-center">{modal.item.title}</div>
+              {modal.item.desc && <div className="text-gray-600 mb-2 text-center whitespace-pre-line">{modal.item.desc}</div>}
+              {modal.item.link && <a href={modal.item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击访问链接</a>}
+            </div>
+          )}
+        </AnimatedModal>
+      </section>
+    </AnimatedPage>
+  );
+}
+
+function Board() {
+  const messagesCloud = useCloudList(TABLES.messages);
+  const [name, setName] = useState('');
+  const [content, setContent] = useState('');
+  // 提交留言
+  const handleSubmit = async () => {
+    if (!content.trim()) return;
+    await messagesCloud.upsert({
+      name: name.trim(),
+      content: content.trim(),
+      time: new Date().toLocaleString(),
+      likes: 0
+    });
+    setContent('');
+    setName('');
+  };
+  // 点赞
+  const handleLike = async idx => {
+    const msg = messagesCloud.list[idx];
+    await messagesCloud.upsert({ ...msg, likes: (msg.likes || 0) + 1 }, msg.objectId);
+  };
+  return (
+    <AnimatedPage>
+      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-xl mt-8">
+        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, scale:0.8}} animate={{opacity:1, scale:1}} transition={{duration:0.7}}>留言板</motion.h2>
+        <motion.p className="text-gray-500 mb-4" initial={{opacity:0}} animate={{opacity:1}} transition={{delay:0.2, duration:0.7}}>欢迎留言交流建议或想法！</motion.p>
+        <motion.form className="flex flex-col gap-4" initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{delay:0.4, duration:0.7}} onSubmit={e => {e.preventDefault();handleSubmit();}}>
+          <input className="border rounded px-3 py-2 focus:ring-2 focus:ring-primary/30 transition" placeholder="你的名字（可选）" value={name} onChange={e=>setName(e.target.value)} />
+          <textarea className="border rounded px-3 py-2 focus:ring-2 focus:ring-primary/30 transition" placeholder="留言内容" rows={3} value={content} onChange={e=>setContent(e.target.value)} />
+          <motion.button
+            type="submit"
+            className="bg-primary text-white rounded px-4 py-2 w-fit self-end transition"
+            whileHover={{ scale: 1.08, boxShadow: "0 4px 16px 0 rgba(31,38,135,0.12)" }}
+            whileTap={{ scale: 0.96 }}
+          >
+            提交
+          </motion.button>
+        </motion.form>
+        <div className="mt-8 space-y-4">
+          {messagesCloud.list.map((msg, idx) => (
+            <div key={msg.objectId || idx} className="bg-gray-100 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <div className="font-bold text-gray-700">{msg.name || '匿名'}</div>
+                <div className="text-gray-800 mb-1">{msg.content}</div>
+                <div className="text-gray-400 text-xs">{msg.time}</div>
+              </div>
+              <button className="ml-4 flex items-center gap-1 text-success hover:scale-110 transition" onClick={()=>handleLike(idx)}>
+                <LikeOutlined /> {msg.likes || 0}
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+    </AnimatedPage>
+  );
+}
+
+function Contact() {
+  return (
+    <AnimatedPage>
+      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-xl mt-8">
+        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, scale:0.8}} animate={{opacity:1, scale:1}} transition={{duration:0.7}}>联系我们</motion.h2>
+        <motion.ul className="text-gray-700 space-y-2" initial={{opacity:0}} animate={{opacity:1}} transition={{delay:0.3, duration:0.7}}>
+          <li>邮箱：cxnet@university.edu</li>
+          <li>QQ群：123456789</li>
+          <li>微信：cxnet_official</li>
+        </motion.ul>
+      </section>
+    </AnimatedPage>
+  );
+}
+
+function AnimatedRoutes() {
+  const location = useLocation();
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        <Route path="/" element={<Home />} />
+        <Route path="/resources" element={<Resources />} />
+        <Route path="/events" element={<Events />} />
+        <Route path="/board" element={<Board />} />
+        <Route path="/contact" element={<Contact />} />
+      </Routes>
+    </AnimatePresence>
+  );
+}
+
 function Admin() {
-  const [data, setData] = useState(loadData());
+  const resourcesCloud = useCloudList(TABLES.resources);
+  const codingCloud = useCloudList(TABLES.coding);
+  const eventsCloud = useCloudList(TABLES.events);
+  const messagesCloud = useCloudList(TABLES.messages);
   const [form] = Form.useForm();
   const [codingForm] = Form.useForm();
+  const [eventForm] = Form.useForm();
   const [modal, setModal] = useState({ open: false, type: '', idx: -1 });
   const [codingModal, setCodingModal] = useState({ open: false, idx: -1 });
+  const [eventModal, setEventModal] = useState({ open: false, idx: -1 });
   const [tab, setTab] = useState('resources');
 
+  // Tabs切换时关闭所有弹窗
+  const handleTabChange = (key) => {
+    setTab(key);
+    setModal({ open: false, type: '', idx: -1 });
+    setCodingModal({ open: false, idx: -1 });
+    setEventModal({ open: false, idx: -1 });
+  };
+
   // 资源其它部分 新增/编辑
-  const handleOk = () => {
-    form.validateFields().then(values => {
-      const newData = { ...data };
-      if (modal.type === 'add') {
-        newData.resources.push(values);
-      } else if (modal.type === 'edit') {
-        newData.resources[modal.idx] = values;
-      }
-      setData(newData);
-      saveData(newData);
-      setModal({ open: false, type: '', idx: -1 });
-      message.success('保存成功');
-      form.resetFields();
-    });
+  const handleOk = async () => {
+    const values = await form.validateFields();
+    if (modal.type === 'add') {
+      await resourcesCloud.upsert(values);
+    } else if (modal.type === 'edit') {
+      await resourcesCloud.upsert(values, resourcesCloud.list[modal.idx].objectId);
+    }
+    setModal({ open: false, type: '', idx: -1 });
+    form.resetFields();
+    message.success('保存成功');
   };
   // 资源其它部分 删除
-  const handleDelete = idx => {
+  const handleDelete = async idx => {
     Modal.confirm({
       title: '确定要删除吗？',
-      onOk: () => {
-        const newData = { ...data };
-        newData.resources.splice(idx, 1);
-        setData(newData);
-        saveData(newData);
+      onOk: async () => {
+        await resourcesCloud.remove(resourcesCloud.list[idx].objectId);
         message.success('已删除');
       }
     });
@@ -215,36 +408,29 @@ function Admin() {
   const openEdit = (type, idx = -1) => {
     setModal({ open: true, type, idx });
     if (type === 'edit') {
-      form.setFieldsValue(data.resources[idx]);
+      form.setFieldsValue(resourcesCloud.list[idx]);
     } else {
       form.resetFields();
     }
   };
   // 编程学习资料 新增/编辑
-  const handleCodingOk = () => {
-    codingForm.validateFields().then(values => {
-      const newData = { ...data };
-      if (codingModal.idx === -1) {
-        newData.coding.push(values);
-      } else {
-        newData.coding[codingModal.idx] = values;
-      }
-      setData(newData);
-      saveData(newData);
-      setCodingModal({ open: false, idx: -1 });
-      message.success('保存成功');
-      codingForm.resetFields();
-    });
+  const handleCodingOk = async () => {
+    const values = await codingForm.validateFields();
+    if (codingModal.idx === -1) {
+      await codingCloud.upsert(values);
+    } else {
+      await codingCloud.upsert(values, codingCloud.list[codingModal.idx].objectId);
+    }
+    setCodingModal({ open: false, idx: -1 });
+    codingForm.resetFields();
+    message.success('保存成功');
   };
   // 编程学习资料 删除条目
-  const handleCodingDelete = idx => {
+  const handleCodingDelete = async idx => {
     Modal.confirm({
       title: '确定要删除这条编程学习资料吗？',
-      onOk: () => {
-        const newData = { ...data };
-        newData.coding.splice(idx, 1);
-        setData(newData);
-        saveData(newData);
+      onOk: async () => {
+        await codingCloud.remove(codingCloud.list[idx].objectId);
         message.success('已删除');
       }
     });
@@ -253,20 +439,48 @@ function Admin() {
   const openCodingEdit = (idx = -1) => {
     setCodingModal({ open: true, idx });
     if (idx !== -1) {
-      codingForm.setFieldsValue(data.coding[idx]);
+      codingForm.setFieldsValue(codingCloud.list[idx]);
     } else {
       codingForm.resetFields();
     }
   };
+  // 活动展示 新增/编辑
+  const handleEventOk = async () => {
+    const values = await eventForm.validateFields();
+    if (eventModal.idx === -1) {
+      await eventsCloud.upsert(values);
+    } else {
+      await eventsCloud.upsert(values, eventsCloud.list[eventModal.idx].objectId);
+    }
+    setEventModal({ open: false, idx: -1 });
+    eventForm.resetFields();
+    message.success('保存成功');
+  };
+  // 活动展示 删除
+  const handleEventDelete = async idx => {
+    Modal.confirm({
+      title: '确定要删除该活动吗？',
+      onOk: async () => {
+        await eventsCloud.remove(eventsCloud.list[idx].objectId);
+        message.success('已删除');
+      }
+    });
+  };
+  // 活动展示 打开编辑
+  const openEventEdit = (idx = -1) => {
+    setEventModal({ open: true, idx });
+    if (idx !== -1) {
+      eventForm.setFieldsValue(eventsCloud.list[idx]);
+    } else {
+      eventForm.resetFields();
+    }
+  };
   // 留言删除
-  const handleDeleteMsg = idx => {
+  const handleDeleteMsg = async idx => {
     Modal.confirm({
       title: '确定要删除这条留言吗？',
-      onOk: () => {
-        const newData = { ...data };
-        newData.messages.splice(idx, 1);
-        setData(newData);
-        saveData(newData);
+      onOk: async () => {
+        await messagesCloud.remove(messagesCloud.list[idx].objectId);
         message.success('留言已删除');
       }
     });
@@ -288,14 +502,10 @@ function Admin() {
         <div className="w-full max-w-2xl bg-white rounded-3xl shadow-xl p-8 mt-8">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold">内容管理后台</h2>
-            <div className="flex gap-2">
-              <Button icon={<DownloadOutlined />} onClick={exportData}>导出数据</Button>
-              <Button icon={<ImportOutlined />} onClick={() => importData(()=>window.location.reload())}>导入数据</Button>
-            </div>
           </div>
           <Tabs
             activeKey={tab}
-            onChange={setTab}
+            onChange={handleTabChange}
             items={[{
               key: 'resources',
               label: '资源分享',
@@ -305,7 +515,7 @@ function Admin() {
                     <div className="font-bold text-lg mb-2">编程学习资料（置顶）</div>
                     <List
                       bordered
-                      dataSource={data.coding}
+                      dataSource={codingCloud.list}
                       renderItem={(item, idx) => (
                         <List.Item
                           actions={[
@@ -325,7 +535,7 @@ function Admin() {
                   <div className="font-bold text-lg mb-2">其它资源</div>
                   <List
                     bordered
-                    dataSource={data.resources}
+                    dataSource={resourcesCloud.list}
                     renderItem={(item, idx) => (
                       <List.Item
                         actions={[
@@ -351,12 +561,12 @@ function Admin() {
               children: (
                 <List
                   bordered
-                  dataSource={data.events}
+                  dataSource={eventsCloud.list}
                   renderItem={(item, idx) => (
                     <List.Item
                       actions={[
-                        <Button size="small" onClick={() => openEdit('edit', idx)}>编辑</Button>,
-                        <Button size="small" danger onClick={() => handleDelete(idx)}>删除</Button>
+                        <Button size="small" onClick={() => openEventEdit(idx)}>编辑</Button>,
+                        <Button size="small" danger onClick={() => handleEventDelete(idx)}>删除</Button>
                       ]}
                     >
                       <div>
@@ -367,7 +577,7 @@ function Admin() {
                       </div>
                     </List.Item>
                   )}
-                  footer={<Button type="primary" onClick={() => openEdit('add')}>新增活动</Button>}
+                  footer={<Button type="primary" onClick={() => openEventEdit(-1)}>新增活动</Button>}
                 />
               )
             }, {
@@ -376,7 +586,7 @@ function Admin() {
               children: (
                 <List
                   bordered
-                  dataSource={data.messages}
+                  dataSource={messagesCloud.list}
                   renderItem={(item, idx) => (
                     <List.Item
                       actions={[
@@ -443,294 +653,38 @@ function Admin() {
             </Form.Item>
           </Form>
         </Modal>
+        {/* 活动展示编辑弹窗 */}
+        <Modal
+          open={eventModal.open}
+          title={eventModal.idx === -1 ? '新增活动' : '编辑活动'}
+          onOk={handleEventOk}
+          onCancel={() => setEventModal({ open: false, idx: -1 })}
+          okText="保存"
+          cancelText="取消"
+        >
+          <Form form={eventForm} layout="vertical">
+            <Form.Item name="title" label="活动标题" rules={[{ required: true, message: '请输入活动标题' }]}> 
+              <Input maxLength={50} />
+            </Form.Item>
+            <Form.Item name="desc" label="活动描述">
+              <Input.TextArea maxLength={200} rows={2} />
+            </Form.Item>
+            <Form.Item name="img" label="活动图片URL">
+              <Input placeholder="如 /img/xxx.jpg 或 https://..." addonAfter={
+                <label className="cursor-pointer text-primary">
+                  <UploadOutlined />
+                  <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleImgUpload(e, eventForm, 'img')} />
+                </label>
+              } />
+              <div className="text-xs text-gray-400 mt-1">可上传图片或粘贴图片链接</div>
+            </Form.Item>
+            <Form.Item name="link" label="活动链接">
+              <Input placeholder="https://..." />
+            </Form.Item>
+          </Form>
+        </Modal>
       </div>
     </ConfigProvider>
-  );
-}
-
-function AnimatedModal({ open, onCancel, children }) {
-  return (
-    <Modal
-      open={open}
-      onCancel={onCancel}
-      footer={null}
-      centered
-      maskStyle={{ backdropFilter: 'blur(8px)', background: 'rgba(255,255,255,0.3)' }}
-      bodyStyle={{ borderRadius: 16, padding: 24, background: 'white' }}
-      width={700}
-      destroyOnClose
-      modalRender={node => (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.92 }}
-          transition={{ duration: 0.32, type: 'spring' }}
-        >{node}</motion.div>
-      )}
-    >
-      {children}
-    </Modal>
-  );
-}
-
-function Resources() {
-  const [items, setItems] = useState(() => (loadData().resources));
-  const [coding, setCoding] = useState(() => (loadData().coding));
-  const [modal, setModal] = useState({ open: false, item: null });
-  const [codingModal, setCodingModal] = useState(false);
-  useEffect(() => {
-    const onStorage = () => {
-      setItems(loadData().resources);
-      setCoding(loadData().coding);
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-  // 复制链接
-  const handleCopy = (text) => {
-    navigator.clipboard.writeText(text);
-  };
-  return (
-    <AnimatedPage>
-      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-2xl mt-8">
-        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, x:-40}} animate={{opacity:1, x:0}} transition={{duration:0.7}}>资源分享</motion.h2>
-        {/* 编程学习资料卡片 */}
-        <motion.div
-          className="bg-gradient-to-br from-blue-100 to-white rounded-3xl p-5 shadow-lg transition cursor-pointer mb-8 hover:shadow-2xl hover:scale-105 border border-blue-200"
-          whileHover={{ scale: 1.04, boxShadow: '0 12px 40px 0 rgba(31,38,135,0.14)' }}
-          whileTap={{ scale: 0.98 }}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          onClick={() => setCodingModal(true)}
-        >
-          <div className="font-bold text-lg mb-2 text-blue-900">编程学习资料</div>
-          <div className="text-gray-500 text-sm">点击查看全部条目</div>
-        </motion.div>
-        {/* 其它资源 */}
-        <div className="grid gap-4">
-          {items.map((item, idx) => (
-            <motion.div
-              key={item.title + idx}
-              className="bg-gray-50 rounded-2xl p-4 shadow transition cursor-pointer"
-              whileHover={{ scale: 1.04, boxShadow: '0 8px 32px 0 rgba(31,38,135,0.12)' }}
-              whileTap={{ scale: 0.98 }}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 + idx * 0.1, duration: 0.5 }}
-              onClick={() => setModal({ open: true, item })}
-            >
-              <div className="flex gap-4 items-center">
-                {item.img && <img src={item.img} alt="" className="h-16 w-16 object-cover rounded-lg border" />}
-                <div className="flex-1">
-                  <div className="text-lg font-bold text-gray-800">{item.title}</div>
-                  {item.desc && <div className="text-gray-500 text-sm mb-1">{item.desc}</div>}
-                  {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击查看</a>}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-        {/* 其它资源弹窗 */}
-        <AnimatedModal open={modal.open} onCancel={() => setModal({ open: false, item: null })}>
-          {modal.item && (
-            <div className="flex flex-col items-center">
-              {modal.item.img && <img src={modal.item.img} alt="" className="h-32 w-32 object-cover rounded-2xl mb-4" />}
-              <div className="text-2xl font-bold mb-2 text-center">{modal.item.title}</div>
-              {modal.item.desc && <div className="text-gray-600 mb-2 text-center whitespace-pre-line">{modal.item.desc}</div>}
-              {modal.item.link && <a href={modal.item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击访问链接</a>}
-            </div>
-          )}
-        </AnimatedModal>
-        {/* 编程学习资料弹窗 */}
-        <AnimatedModal open={codingModal} onCancel={() => setCodingModal(false)}>
-          <div className="flex flex-col items-center">
-            <div className="text-2xl font-bold mb-4 text-center text-blue-900">编程学习资料</div>
-            <ul className="w-full space-y-3">
-              {coding.map((item, idx) => (
-                <li
-                  key={idx}
-                  className="flex flex-col md:flex-row md:items-center bg-blue-50 rounded-xl px-4 py-3 select-all break-all border border-blue-100 shadow-sm"
-                >
-                  <span className="font-bold text-gray-800 flex-shrink-0 md:w-32 mb-1 md:mb-0 truncate">{item.name}</span>
-                  <Button
-                    type="link"
-                    icon={<CopyOutlined />}
-                    size="small"
-                    className="text-blue-600 font-mono break-all text-left"
-                    style={{ padding: 0, wordBreak: 'break-all', whiteSpace: 'normal' }}
-                    onClick={() => handleCopy(item.link)}
-                  >{item.link}</Button>
-                </li>
-              ))}
-            </ul>
-            <div className="text-xs text-gray-400 mt-2">* 点击链接可复制</div>
-          </div>
-        </AnimatedModal>
-      </section>
-    </AnimatedPage>
-  );
-}
-
-function Events() {
-  const [items, setItems] = useState(() => (loadData().events));
-  const [modal, setModal] = useState({ open: false, item: null });
-  useEffect(() => {
-    const onStorage = () => setItems(loadData().events);
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-  return (
-    <AnimatedPage>
-      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-xl mt-8">
-        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, x:40}} animate={{opacity:1, x:0}} transition={{duration:0.7}}>活动展示</motion.h2>
-        <div className="grid gap-4">
-          {items.map((item, idx) => (
-            <motion.div
-              key={item.title + idx}
-              className="bg-gray-50 rounded-xl p-4 shadow transition cursor-pointer"
-              whileHover={{ scale: 1.04, boxShadow: '0 8px 32px 0 rgba(31,38,135,0.12)' }}
-              whileTap={{ scale: 0.98 }}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 + idx * 0.1, duration: 0.5 }}
-              onClick={() => setModal({ open: true, item })}
-            >
-              <div className="flex gap-4 items-center">
-                {item.img && <img src={item.img} alt="" className="h-16 w-16 object-cover rounded-lg border" />}
-                <div className="flex-1">
-                  <div className="text-lg font-bold text-gray-800">{item.title}</div>
-                  {item.desc && <div className="text-gray-500 text-sm mb-1">{item.desc}</div>}
-                  {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击查看</a>}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-        {/* 弹窗展示详细内容，带毛玻璃遮罩 */}
-        <Modal
-          open={modal.open}
-          onCancel={() => setModal({ open: false, item: null })}
-          footer={null}
-          centered
-          maskStyle={{ backdropFilter: 'blur(8px)', background: 'rgba(255,255,255,0.3)' }}
-          bodyStyle={{ borderRadius: 16, padding: 24 }}
-          width={400}
-          destroyOnClose
-        >
-          {modal.item && (
-            <div className="flex flex-col items-center">
-              {modal.item.img && <img src={modal.item.img} alt="" className="h-32 w-32 object-cover rounded-xl mb-4" />}
-              <div className="text-2xl font-bold mb-2 text-center">{modal.item.title}</div>
-              {modal.item.desc && <div className="text-gray-600 mb-2 text-center whitespace-pre-line">{modal.item.desc}</div>}
-              {modal.item.link && <a href={modal.item.link} target="_blank" rel="noopener noreferrer" className="text-blue-500">点击访问链接</a>}
-            </div>
-          )}
-        </Modal>
-      </section>
-    </AnimatedPage>
-  );
-}
-
-function Board() {
-  const [name, setName] = useState('');
-  const [content, setContent] = useState('');
-  const [msgs, setMsgs] = useState(() => loadData().messages);
-  // 提交留言
-  const handleSubmit = () => {
-    if (!content.trim()) return;
-    const newMsg = {
-      name: name.trim(),
-      content: content.trim(),
-      time: new Date().toLocaleString(),
-      likes: 0
-    };
-    const all = [...msgs, newMsg];
-    setMsgs(all);
-    const d = loadData();
-    d.messages = all;
-    saveData(d);
-    setContent('');
-    setName('');
-  };
-  // 点赞
-  const handleLike = idx => {
-    const all = msgs.slice();
-    all[idx].likes = (all[idx].likes || 0) + 1;
-    setMsgs(all);
-    const d = loadData();
-    d.messages = all;
-    saveData(d);
-  };
-  useEffect(() => {
-    const onStorage = () => setMsgs(loadData().messages);
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-  return (
-    <AnimatedPage>
-      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-xl mt-8">
-        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, scale:0.8}} animate={{opacity:1, scale:1}} transition={{duration:0.7}}>留言板</motion.h2>
-        <motion.p className="text-gray-500 mb-4" initial={{opacity:0}} animate={{opacity:1}} transition={{delay:0.2, duration:0.7}}>欢迎留言交流建议或想法！</motion.p>
-        <motion.form className="flex flex-col gap-4" initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{delay:0.4, duration:0.7}} onSubmit={e => {e.preventDefault();handleSubmit();}}>
-          <input className="border rounded px-3 py-2 focus:ring-2 focus:ring-primary/30 transition" placeholder="你的名字（可选）" value={name} onChange={e=>setName(e.target.value)} />
-          <textarea className="border rounded px-3 py-2 focus:ring-2 focus:ring-primary/30 transition" placeholder="留言内容" rows={3} value={content} onChange={e=>setContent(e.target.value)} />
-          <motion.button
-            type="submit"
-            className="bg-primary text-white rounded px-4 py-2 w-fit self-end transition"
-            whileHover={{ scale: 1.08, boxShadow: "0 4px 16px 0 rgba(31,38,135,0.12)" }}
-            whileTap={{ scale: 0.96 }}
-          >
-            提交
-          </motion.button>
-        </motion.form>
-        <div className="mt-8 space-y-4">
-          {msgs.map((msg, idx) => (
-            <div key={idx} className="bg-gray-100 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <div className="font-bold text-gray-700">{msg.name || '匿名'}</div>
-                <div className="text-gray-800 mb-1">{msg.content}</div>
-                <div className="text-gray-400 text-xs">{msg.time}</div>
-              </div>
-              <button className="ml-4 flex items-center gap-1 text-success hover:scale-110 transition" onClick={()=>handleLike(idx)}>
-                <LikeOutlined /> {msg.likes || 0}
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
-    </AnimatedPage>
-  );
-}
-
-function Contact() {
-  return (
-    <AnimatedPage>
-      <section className="max-w-2xl mx-auto p-8 bg-white rounded-3xl shadow-xl mt-8">
-        <motion.h2 className="text-3xl font-bold mb-4" initial={{opacity:0, scale:0.8}} animate={{opacity:1, scale:1}} transition={{duration:0.7}}>联系我们</motion.h2>
-        <motion.ul className="text-gray-700 space-y-2" initial={{opacity:0}} animate={{opacity:1}} transition={{delay:0.3, duration:0.7}}>
-          <li>邮箱：cxnet@university.edu</li>
-          <li>QQ群：123456789</li>
-          <li>微信：cxnet_official</li>
-        </motion.ul>
-      </section>
-    </AnimatedPage>
-  );
-}
-
-function AnimatedRoutes() {
-  const location = useLocation();
-  return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<Home />} />
-        <Route path="/resources" element={<Resources />} />
-        <Route path="/events" element={<Events />} />
-        <Route path="/board" element={<Board />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/admin" element={<Admin />} />
-      </Routes>
-    </AnimatePresence>
   );
 }
 
